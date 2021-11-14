@@ -282,7 +282,7 @@
 ### momentum = 0.8 
 
 ```python
-6250it [05:27, 19.08it/s]
+250it [05:27, 19.08it/s]
 Finish 1 epoch, Loss: 1.631940, Acc: 0.402380
 Test Loss: 1.229264, Acc: 0.561700
 6250it [05:27, 19.08it/s]
@@ -381,5 +381,135 @@ Test Loss: 0.760389, Acc: 0.852300
 6250it [05:27, 19.06it/s]
 Finish 33 epoch, Loss: 0.018003, Acc: 0.994360
 Test Loss: 0.735785, Acc: 0.853100
+```
+
+# 迁移学习
+
+```
+************************* epoch 1 *************************
+1563it [02:42,  9.60it/s]
+Finish 1 epoch, Loss: 1.054016, Acc: 0.631980
+Test Loss: 0.926332, Acc: 0.675100
+
+************************* epoch 2 *************************
+1563it [02:43,  9.58it/s]
+Finish 2 epoch, Loss: 0.906125, Acc: 0.682040
+Test Loss: 0.891646, Acc: 0.690500
+
+************************* epoch 3 *************************
+1563it [02:42,  9.62it/s]
+Finish 3 epoch, Loss: 0.836706, Acc: 0.704080
+Test Loss: 0.871394, Acc: 0.693400
+
+************************* epoch 4 *************************
+1563it [02:43,  9.58it/s]
+Finish 4 epoch, Loss: 0.779822, Acc: 0.726940
+Test Loss: 0.848277, Acc: 0.704600
+```
+
+
+
+```python
+import copy
+
+import torch
+import torch.nn as nn
+from torch import optim
+from torch.utils.data import DataLoader
+import torchvision
+from torchvision import transforms, datasets,models
+import os
+from torch.autograd import Variable
+import matplotlib.pyplot as plt
+import time
+from tqdm import tqdm   #tqdm是python可扩展的进度条
+
+# 定义超参数start
+batch_size = 32 # 批的大小
+learning_rate = 0.00001  # 学习率
+num_epoches = 20  # 遍历训练集的次数
+num_workers =4
+DEVICE = torch.device('cuda'if torch.cuda.is_available() else 'cpu')
+# 定义超参数end
+
+#transform转换
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406],
+                         [0.229, 0.224, 0.225]),
+    ])
+
+# 下载、加载数据集
+train_dataset = datasets.CIFAR10('./data', train=True, transform=transform, download=True)
+test_dataset = datasets.CIFAR10('./data', train=False, transform=transform, download=True)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)   #num_workers是多线程
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+
+#定义优化器
+vgg =models.vgg16(pretrained=True)
+for parma in vgg.parameters():
+    parma.requires_grad=False
+vgg.classifier = nn.Sequential(
+    nn.Linear(25088, 4096),
+    nn.ReLU(),
+    nn.Dropout(0.5),
+    nn.Linear(4096, 4096),
+    nn.Dropout(0.5),
+    nn.Linear(4096, 10),
+)
+print(vgg)
+
+model = vgg.to(DEVICE)  #部署到设备上
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(vgg.classifier.parameters(), lr=learning_rate)
+best_acc = 0.0
+best_model_wts = copy.deepcopy(model.state_dict())
+for epoch in range(num_epoches):
+    print('*' * 25, 'epoch {}'.format(epoch + 1), '*' * 25)  # .format为输出格式，formet括号里的即为左边花括号的输出
+    # 训练模型start
+    running_loss = 0.0
+    running_acc = 0.0
+    model.train()
+    for i, data in tqdm(enumerate(train_loader, 1)):
+        img, label = data
+        img, label = img.to(DEVICE), label.to(DEVICE)
+        # 向前传播
+        out = model(img)
+        loss = criterion(out, label)
+        running_loss += loss.item() * label.size(0)
+        _, pred = torch.max(out, 1)  # 预测最大值所在的位置标签
+        num_correct = (pred == label).sum()
+        accuracy = (pred == label).float().mean()
+        running_acc += num_correct.item()
+
+        # 向后传播
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+    print('Finish {} epoch, Loss: {:.6f}, Acc: {:.6f}'.format(
+        epoch + 1, running_loss / (len(train_dataset)), running_acc / (len(train_dataset))))
+#训练模型end
+
+#测试方法start
+    model.eval()  # 模型评估
+    eval_loss = 0
+    eval_acc = 0
+    for data in test_loader:  # 测试模型
+        img, label = data
+        img, label = img.to(DEVICE), label.to(DEVICE)
+        out = model(img)
+        loss = criterion(out, label)
+        eval_loss += loss.item() * label.size(0)
+        _, pred = torch.max(out, 1)
+        num_correct = (pred == label).sum()
+        eval_acc += num_correct.item()
+    print('Test Loss: {:.6f}, Acc: {:.6f}'.format(eval_loss / (len(
+        test_dataset)), eval_acc / (len(test_dataset))))
+    print()
+#测试方法end
+
+# 保存模型
+torch.save(model.state_dict(), './cnn.pth')
+
 ```
 
